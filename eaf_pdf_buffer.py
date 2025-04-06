@@ -79,13 +79,13 @@ class AppBuffer(Buffer):
 
         # Use thread to avoid slow down open speed.
         threading.Thread(target=self.record_open_history).start()
-        
+
         file_name = os.path.basename(self.url)
         self.cache_file_name = os.path.join(get_emacs_config_dir(), "pdf", "cache", file_name + ".txt")
         self._is_caching = False
 
         self.build_all_methods(self.buffer_widget)
-        
+
         self.last_percentage = -1
 
         # Convert title if pdf is converted from office file.
@@ -137,7 +137,7 @@ class AppBuffer(Buffer):
         if not self._is_caching:
             self._is_caching = True
             threading.Thread(target=lambda : self._cache_reverse_index(True)).start()
-        
+
     def _cache_reverse_index(self, force=False):
         # get file name from self.url
         cache_file_name = self.cache_file_name
@@ -291,15 +291,15 @@ class AppBuffer(Buffer):
             self.buffer_widget.cleanup_links()
         if self.buffer_widget.is_select_mode:
             self.buffer_widget.cleanup_select()
-            
+
     def mark_position(self, percentage=-1):
         self.last_percentage = percentage if percentage != -1 else self.buffer_widget.current_percent()
-        
+
     def toggle_last_position(self):
         if self.last_percentage != -1:
             last_percentage = self.last_percentage
             self.mark_position()
-            self.buffer_widget.jump_to_percent(last_percentage) 
+            self.buffer_widget.jump_to_percent(last_percentage)
 
     def narrow_search_protocol(self, search_term="", pages=None, index=None):
         if pages == -3: # -3 as search begin signal
@@ -549,14 +549,56 @@ class AppBuffer(Buffer):
         if len(toc_pages) >= 100:
             index = bisect_left(toc_pages, page)
         else:
-            for i in range(len(toc_pages)): 
+            for i in range(len(toc_pages)):
                 if page < toc_pages[i]:
                     index = i-1
                     break
         return toc_list, index
-    
+
     def edit_outline_confirm(self, payload):
         self.buffer_widget.edit_outline_confirm(payload)
 
     def get_progress(self):
         return self.buffer_widget.get_page_progress()
+
+    @PostGui()
+    def keyboard_select_text_right(self):
+        self.buffer_widget.move_current_page_word(0, 0, 1)
+
+    @PostGui()
+    def keyboard_select_text_left(self):
+        self.buffer_widget.move_current_page_word(0, 0, -1)
+
+    @PostGui()
+    def keyboard_select_text_up(self):
+        self.buffer_widget.move_current_page_word(0, -1, 0)
+
+    @PostGui()
+    def keyboard_select_text_down(self):
+        self.buffer_widget.move_current_page_word(0, 1, 0)
+
+    @PostGui()
+    def keyboard_expand_text_right(self):
+        self.buffer_widget.move_current_page_word(0, 0, 1, True)
+
+    @PostGui()
+    def keyboard_expand_text_left(self):
+        self.buffer_widget.move_current_page_word(0, 0, -1, True)
+
+    @PostGui()
+    def keyboard_expand_text_up(self):
+        self.buffer_widget.move_current_page_word(0, -1, 0, True)
+
+    @PostGui()
+    def keyboard_expand_text_down(self):
+        self.buffer_widget.move_current_page_word(0, 1, 0, True)
+
+    @PostGui()
+    def keyboard_selected_text(self):
+        text = self.buffer_widget.selected_text()
+        eval_in_emacs("message", [f'Copy: {text}'])
+        eval_in_emacs("kill-new", [text])
+
+    @PostGui()
+    def keyboard_selected_text_add_annot_of_action(self):
+        self.buffer_widget.selected_text_add_annot_of_action()

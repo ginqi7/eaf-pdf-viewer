@@ -130,6 +130,16 @@ class PdfViewerWidget(QWidget):
         self.search_text_quads_list = []
         self.search_page_history = set()
 
+        #keyboard text mode
+        self.is_keyboard_text_mode = False
+        self.is_mark_select_text = False
+        self.current_select_text_quads = None
+        self.select_text_quads_list = []
+        self.select_text_words_list = []
+        self.current_page_words = None
+        self.current_page_word_position = (0, 0, 0)
+
+
         # select text
         self.is_select_mode = False
         self.start_char_rect_index = None
@@ -392,6 +402,12 @@ class PdfViewerWidget(QWidget):
         else:
             page.cleanup_search_text()
 
+        #
+        if self.is_mark_select_text:
+            page.mark_select_text(self.current_select_text_quads, self.select_text_quads_list)
+        else:
+            page.cleanup_select_text()
+
         if self.is_jump_link:
             self.jump_link_key_cache_dict.update(page.mark_jump_link_tips(self.marker_letters))
         else:
@@ -512,11 +528,11 @@ class PdfViewerWidget(QWidget):
         # Render progress information.  # type: ignore
         painter.setPen(QColor(self.get_render_foreground_color()))
         self.update_page_progress(painter)
-        
+
         if self.is_mark_search and not self.document.is_pdf and self.current_search_quads and self.current_search_page:
             x0, y0, x1, y1 = self.current_search_quads.rect
             page_offset = self.scroll_offset - (self.current_search_page) * self.scale * self.page_height
-            
+
             x, y = (x0 - 10 + self.page_render_x/2) * self.scale, y1 * self.scale-page_offset
             # print(self.current_search_quads.rect)
             # pos = QPoint(x, y)
@@ -672,7 +688,7 @@ class PdfViewerWidget(QWidget):
             base_progress_font_size = self.default_progress_font_size
             if type(show_progress_on_page) == int:
                 base_progress_font_size = show_progress_on_page
-            
+
 
             progress_font_size = int((1-0.6*math.exp(-1.5*(self.scale-1))) * base_progress_font_size)
             progress_font = QFont()
@@ -1083,13 +1099,83 @@ class PdfViewerWidget(QWidget):
         self.page_cache_pixmap_dict.clear()
         self.update()
 
+    def _merge_quads_list(self, quads_list):
+        min_x = float('inf')
+        min_y = float('inf')
+        max_x = float('-inf')
+        max_y = float('-inf')
+        for quad in quads_list:
+            points = [quad.ul, quad.ur, quad.lr, quad.ll]
+            for point in points:
+                if point.x < min_x:
+                    min_x = point.x
+                if point.y < min_y:
+                    min_y = point.y
+                if point.x > max_x:
+                    max_x = point.x
+                if point.y > max_y:
+                    max_y = point.y
+        ul = fitz.Point(min_x, min_y)
+        ur = fitz.Point(max_x, min_y)
+        lr = fitz.Point(max_x, max_y)
+        ll = fitz.Point(min_x, max_y)
+        return fitz.Quad(ul, ur, ll, lr)
+
+    def _word_to_quads(self, word):
+        x0, y0, x1, y1 = word[0],word[1], word[2],word[3]
+
+        ul = fitz.Point(x0, y0)  # ul
+        ur = fitz.Point(x1, y0)  # ur
+        ll = fitz.Point(x0, y1)  # ll
+        lr = fitz.Point(x1, y1)  # lr
+
+        return fitz.Quad(ul, ur, ll, lr)
+
+    def _find_word_index(self, words_list, word):
+        for i in range(len(words_list)):
+            for j in range(len(words_list[i])):
+                if words_list[i][j] == word:
+                    return (i, j)
+        return None
+
+
+    def _keyboard_select_text(self, word, expand=False):
+        index = self._find_word_index(self.select_text_words_list, word)
+
+        if index:
+            i, j = index
+            self.select_text_words_list[i] = self.select_text_words_list[i][:j]
+            if j > 0:
+                i += 1
+            while i < len(self.select_text_words_list):
+                self.select_text_words_list.pop()
+        else:
+            if len(self.select_text_words_list) == 0:
+                self.select_text_words_list.append([word])
+            else:
+                last_word = self.select_text_words_list[-1][-1]
+                block_begin, line_begin, word_begin = last_word[5],last_word[6],last_word[7]
+                block_end, line_end, word_end = word[5],word[6],word[7]
+                word_begin += 1
+                while line_begin < line_end:
+                    self.select_text_words_list[-1].extend(self.current_page_words[block_begin][line_begin][word_begin:])
+                    line_begin += 1
+                    word_begin = 0
+                    self.select_text_words_list.append([])
+                self.select_text_words_list[-1].extend(self.current_page_words[block_end][line_end][word_begin:word_end+1])
+        self.current_select_text_quads = self._word_to_quads(word)
+        print(self.current_select_text_quads)
+        self.select_text_quads_list = [self._merge_quads_list([self._word_to_quads(word) for word in words]) for words in self.select_text_words_list ]
+        offset = ((self.current_page_index - 1) * self.page_height + self.current_select_text_quads.ul.y) * self.scale
+        self.jump_to_offset(offset)
+
     def _search_in_pages(self, text, page_list):
         for page_index in page_list:
             # Search from the current page
             page = self.document[page_index]
             if page_index < self.current_page_index:
                 self.search_text_index = len(self.search_text_quads_list)
-            
+
             if support_hit_max:
                 quads_list = self.document.search_page_for(page_index, text, hit_max=999, quads=True)
             else:
@@ -1101,6 +1187,17 @@ class PdfViewerWidget(QWidget):
                     self.search_text_quads_list.append(quad)
                 self.search_page_history.add(page)
         return quads_list
+
+    def keyboard_select_text(self, word, expand=False):
+        self.is_mark_select_text = True
+        self.page_cache_pixmap_dict.clear()
+        if not expand:
+            self.select_text_words_list.clear()
+            self.select_text_quads_list.clear()
+        self._keyboard_select_text(word, expand=False)
+        self.update()
+
+
 
     def search_text(self, text, page_num = None, page_offset=-1):
         self.is_mark_search = True
@@ -1881,3 +1978,109 @@ class PdfViewerWidget(QWidget):
 
     def build_reverse_index(self):
         return self.document.build_reverse_index()
+
+
+    def words_to_3d(self, words):
+        array_3d = []
+        for word in words:
+            block_no, line_no, _ = word[5], word[6], word[7]
+            while len(array_3d) <= block_no:
+                array_3d.append([])
+            while len(array_3d[block_no]) <= line_no:
+                array_3d[block_no].append([])
+            array_3d[block_no][line_no].append(word)
+        return array_3d
+
+    def get_page_words(self):
+        page = self.document[self.current_page_index - 1]
+        self.current_page_words = self.words_to_3d(page.get_text('words'))
+        self.current_page_word_position = (0, 0, 0)
+
+
+    def _move_word_by_block_offset(self, offset):
+        block_no, line_no, word_no = self.current_page_word_position
+        block_no = block_no + offset
+        num_blocks = len(self.current_page_words)
+        if block_no < 0:
+            # previous page
+            self.current_page_index -= 1
+            if self.current_page_index < 1:
+                return
+            self.jump_to_page(self.current_page_index)
+            # self.update()
+            # time.sleep(0.2)
+            print(self.current_page_index)
+            self.get_page_words()
+            block_no = len(self.current_page_words) - 1
+            line_no = len(self.current_page_words[block_no]) - 1
+            word_no = len(self.current_page_words[block_no][line_no]) - 1
+
+        elif block_no >= num_blocks:
+            # next page
+            self.current_page_index += 1
+            if self.current_page_index > self.page_total_number:
+                return
+            self.jump_to_page(self.current_page_index)
+            # self.update()
+            # time.sleep(0.2)
+            print(self.current_page_index)
+            self.get_page_words()
+            block_no, line_no, word_no = 0, 0, 0
+
+        self.current_page_word_position = block_no, line_no, word_no
+
+    def _move_word_by_line_offset(self, offset):
+        block_no, line_no, word_no = self.current_page_word_position
+        line_no = line_no + offset
+        num_lines = len(self.current_page_words[block_no])
+
+        if line_no < 0:
+            self._move_word_by_block_offset(-1)
+            block_no, _, _ = self.current_page_word_position
+            line_no = len(self.current_page_words[block_no])-1
+            word_no = len(self.current_page_words[block_no][line_no])-1
+        elif line_no >= num_lines:
+            self._move_word_by_block_offset(1)
+            block_no, _, _ = self.current_page_word_position
+            line_no = 0
+            word_no = 0
+
+        self.current_page_word_position = block_no, line_no, word_no
+
+    def _move_word_by_word_offset(self, offset):
+        block_no, line_no, word_no = self.current_page_word_position
+        word_no = word_no + offset
+        num_words = len(self.current_page_words[block_no][line_no])
+
+        if word_no < 0:
+            self._move_word_by_line_offset(-1)
+            block_no, line_no, _ = self.current_page_word_position
+            word_no = len(self.current_page_words[block_no][line_no])-1
+        elif word_no >= num_words:
+            self._move_word_by_line_offset(1)
+            block_no, line_no, _ = self.current_page_word_position
+            word_no = 0
+
+        self.current_page_word_position = block_no, line_no, word_no
+
+    def move_current_page_word(self, block_offset, line_offset, word_offset, expand=False):
+        if not self.current_page_words:
+            self.get_page_words()
+        self._move_word_by_block_offset(block_offset)
+        self._move_word_by_line_offset(line_offset)
+        self._move_word_by_word_offset(word_offset)
+
+        (block_no, line_no, word_no) = self.current_page_word_position
+        word = self.current_page_words[block_no][line_no][word_no]
+        self.keyboard_select_text(word, expand)
+
+    def selected_text(self):
+        return " ".join([" ".join([word[4] for word in words]) for words in self.select_text_words_list])
+
+
+    def selected_text_add_annot_of_action(self):
+        page = self.document[self.current_page_index - 1]
+        for quads in self.select_text_quads_list:
+            new_annot = page.add_squiggly_annot(quads)
+            annot_action = AnnotAction.create_annot_action("Add", self.current_page_index, new_annot)
+            self.add_annot_of_action(annot_action)

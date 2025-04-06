@@ -78,6 +78,7 @@ class PdfPage(fitz.Page):
 
         self._mark_link_annot_list = []
         self._mark_search_annot_list = []
+        self._mark_select_text_annot_list = []
         self._mark_jump_annot_list = []
 
         self._page_rawdict = self._init_page_rawdict()
@@ -332,8 +333,8 @@ class PdfPage(fitz.Page):
 
         if not self.is_pdf:
             # add_highlight_annot is only for pdf
-            return 
-        
+            return
+
         if support_hit_max:
             quads_list = self.page.searchFor(keyword, hit_max=999, quads=True)
         else:
@@ -348,6 +349,32 @@ class PdfPage(fitz.Page):
                     annot.set_colors(stroke=qcolor.getRgbF()[0:3])
                     annot.update()
                 self._mark_search_annot_list.append(annot)
+
+    def mark_select_text(self, current_quads, quads_list):
+        self.cleanup_select_text()
+
+        if not self.is_pdf:
+            # add_highlight_annot is only for pdf
+            return
+        if quads_list:
+            for quads in quads_list:
+                annot = self.page.add_highlight_annot(quads)
+                annot.parent = self.page
+                self._mark_select_text_annot_list.append(annot)
+
+        annot = self.page.add_highlight_annot(current_quads)
+        annot.parent = self.page
+        qcolor = QColor("#f28100")
+        annot.set_colors(stroke=qcolor.getRgbF()[0:3])
+        annot.update()
+        self._mark_select_text_annot_list.append(annot)
+
+    def cleanup_select_text(self):
+        if self._mark_select_text_annot_list:
+            # message_to_emacs("Unmarked all matched results.")
+            for annot in self._mark_select_text_annot_list:
+                self.page.delete_annot(annot)
+            self._mark_select_text_annot_list = []
 
     def cleanup_search_text(self):
         if self._mark_search_annot_list:
