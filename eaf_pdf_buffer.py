@@ -600,5 +600,16 @@ class AppBuffer(Buffer):
         eval_in_emacs("kill-new", [text])
 
     @PostGui()
+    def keyboard_translate_selected_text(self):
+        text = self.buffer_widget.selected_text()
+        eval_in_emacs("eaf-translate-text", [text])
+
+    @PostGui()
+    def keyboard_selected_text_actions(self):
+        text = self.buffer_widget.selected_text()
+        eval_in_emacs("eaf-pdf-actions", [text])
+
+
+    @PostGui()
     def keyboard_selected_text_add_annot_of_action(self):
         self.buffer_widget.selected_text_add_annot_of_action()

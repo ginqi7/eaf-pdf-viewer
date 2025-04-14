@@ -755,8 +755,13 @@ This function works best if paired with a fuzzy search package."
   (eaf-call-async
    "execute_function_with_args" eaf--buffer-id "cache_reverse_index" 't))
 
+(defun eaf-pdf-actions (text)
+  (interactive)
+  (warn "You should implement `eaf-pdf-actions` yourself."))
+
+
 ;; pdf narrow
-(defun eaf-pdf-narrow--begin (eaf-buffer-id) 
+(defun eaf-pdf-narrow--begin (eaf-buffer-id)
   "prepared to search"
   (let ((current-page-file-name
          (eaf-call-sync "execute_function_with_args"
